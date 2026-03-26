@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "name": "Character Nudges",
+  "identifier": "character_nudges",
+  "author": "Lumiverse",
+  "github": "https://github.com/lumiverse/character-nudges",
+  "homepage": "https://github.com/lumiverse/character-nudges",
+  "description": "Characters send you push notifications when you've been away, as if they miss you and want you to come back to the chat.",
+  "permissions": [
+    "push_notification",
+    "generation",
+    "characters",
+    "chats",
+    "chat_mutation"
+  ],
+  "entry_backend": "dist/backend.js",
+  "entry_frontend": "dist/frontend.js"
+}
