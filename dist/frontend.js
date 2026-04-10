@@ -1,9 +1,5 @@
 // src/frontend.ts
 function setup(ctx) {
-  const myClientId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `cn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const sendToBackend = (payload) => {
-    ctx.sendToBackend({ ...payload, clientId: myClientId });
-  };
   let permissions = null;
   let characters = [];
   let configs = {};
@@ -703,7 +699,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       expandedCharacterId = isExpanded ? null : char.id;
       if (!isExpanded) {
         draftConfigs[char.id] = { ...configs[char.id] ?? getDefaultConfig() };
-        sendToBackend({ type: "get_chats", characterId: char.id });
+        ctx.sendToBackend({ type: "get_chats", characterId: char.id });
       }
       render();
     });
@@ -764,7 +760,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     toggleInput.checked = draft.enabled;
     toggleInput.addEventListener("change", () => {
       draft.enabled = toggleInput.checked;
-      sendToBackend({ type: "save_config", characterId: char.id, config: draft });
+      ctx.sendToBackend({ type: "save_config", characterId: char.id, config: draft });
     });
     const slider = document.createElement("span");
     slider.className = "cn-toggle-slider";
@@ -849,7 +845,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       d.maxTokens = clamp(d.maxTokens, 1, 131072);
       d.temperature = clamp(d.temperature, 0, 2);
       d.topP = clamp(d.topP, 0, 1);
-      sendToBackend({ type: "save_config", characterId: char.id, config: d });
+      ctx.sendToBackend({ type: "save_config", characterId: char.id, config: d });
     });
     const historyBtn = document.createElement("button");
     historyBtn.className = "cn-btn";
@@ -858,13 +854,13 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     historyBtn.style.alignItems = "center";
     historyBtn.style.gap = "4px";
     historyBtn.addEventListener("click", () => {
-      sendToBackend({ type: "get_nudge_history", characterId: char.id });
+      ctx.sendToBackend({ type: "get_nudge_history", characterId: char.id });
     });
     const testBtn = document.createElement("button");
     testBtn.className = "cn-btn";
     testBtn.textContent = "Test Nudge";
     testBtn.addEventListener("click", () => {
-      sendToBackend({ type: "trigger_test_nudge", characterId: char.id });
+      ctx.sendToBackend({ type: "trigger_test_nudge", characterId: char.id });
     });
     btnRow.append(saveBtn, historyBtn, testBtn);
     body.appendChild(btnRow);
@@ -952,7 +948,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     expandBtn.innerHTML = expandSvg;
     expandBtn.title = "Open in expanded editor";
     expandBtn.addEventListener("click", () => {
-      sendToBackend({
+      ctx.sendToBackend({
         type: "open_text_editor",
         title: label,
         value: textarea.value
@@ -969,8 +965,6 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     return hr;
   }
   const unsubBackend = ctx.onBackendMessage((payload) => {
-    if (payload?.clientId && payload.clientId !== myClientId)
-      return;
     switch (payload.type) {
       case "permissions_checked":
         permissions = payload;
@@ -1045,9 +1039,9 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     }
   });
   const unsubTabActivate = tab.onActivate(() => {
-    sendToBackend({ type: "check_permissions" });
-    sendToBackend({ type: "get_characters" });
-    sendToBackend({ type: "get_connections" });
+    ctx.sendToBackend({ type: "check_permissions" });
+    ctx.sendToBackend({ type: "get_characters" });
+    ctx.sendToBackend({ type: "get_connections" });
   });
   const settingsRoot = ctx.ui.mount("settings_extensions");
   let globals = null;
@@ -1137,7 +1131,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     saveBtn.className = "cn-btn cn-btn-primary";
     saveBtn.textContent = "Save Defaults";
     saveBtn.addEventListener("click", () => {
-      sendToBackend({ type: "save_globals", globals: { ...globals, ...g } });
+      ctx.sendToBackend({ type: "save_globals", globals: { ...globals, ...g } });
     });
     panel.appendChild(saveBtn);
     settingsRoot.appendChild(panel);
@@ -1151,11 +1145,11 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     tab.activate();
   });
   queueMicrotask(() => {
-    sendToBackend({ type: "check_permissions" });
-    sendToBackend({ type: "get_characters" });
-    sendToBackend({ type: "get_connections" });
-    sendToBackend({ type: "get_defaults" });
-    sendToBackend({ type: "get_globals" });
+    ctx.sendToBackend({ type: "check_permissions" });
+    ctx.sendToBackend({ type: "get_characters" });
+    ctx.sendToBackend({ type: "get_connections" });
+    ctx.sendToBackend({ type: "get_defaults" });
+    ctx.sendToBackend({ type: "get_globals" });
   });
   render();
   return () => {

@@ -216,10 +216,8 @@ async function buildNudgeMessages(config, chatId, characterId, recentMessages, u
 }
 spindle.onFrontendMessage(async (payload, userId) => {
   currentUserId = userId;
-  const clientId = payload?.clientId;
   const reply = (msg) => {
-    const broadcast = spindle.sendToFrontend.bind(spindle);
-    broadcast({ ...msg, clientId });
+    spindle.sendToFrontend(msg, userId);
   };
   switch (payload.type) {
     case "get_characters": {

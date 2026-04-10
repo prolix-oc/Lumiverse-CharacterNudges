@@ -353,13 +353,11 @@ async function buildNudgeMessages(
 spindle.onFrontendMessage(async (payload: any, userId: string) => {
   currentUserId = userId
 
-  // Operator-scoped extensions have `sendToFrontend` broadcast to ALL connected
-  // sessions. We echo the requester's per-instance `clientId` so the frontend
-  // can drop responses meant for other users. See frontend.ts for the filter.
-  const clientId: string | undefined = payload?.clientId
+  // Route every reply to the originating user. Without the userId argument,
+  // operator-scoped extensions broadcast `sendToFrontend` to every connected
+  // session, which leaks one user's data into another user's UI.
   const reply = (msg: Record<string, unknown>) => {
-    const broadcast = spindle.sendToFrontend.bind(spindle)
-    broadcast({ ...msg, clientId })
+    spindle.sendToFrontend(msg, userId)
   }
 
   switch (payload.type) {

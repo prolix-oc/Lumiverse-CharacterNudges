@@ -8,7 +8,7 @@
     "build:frontend": "bun build src/frontend.ts --outfile dist/frontend.js --target browser"
   },
   "devDependencies": {
-    "lumiverse-spindle-types": "^0.2.2",
+    "lumiverse-spindle-types": "^0.4.19",
     "typescript": "^6.0.2"
   }
 }

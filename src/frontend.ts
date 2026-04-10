@@ -59,20 +59,6 @@ interface PermissionStatus {
 // ---------------------------------------------------------------------------
 
 export function setup(ctx: SpindleFrontendContext) {
-  // Per-frontend-instance correlation ID. Operator-scoped extensions have
-  // `spindle.sendToFrontend()` broadcast to ALL connected sessions, so without
-  // filtering, User A's screen would receive (and apply) User B's responses.
-  // We tag every outbound message with this ID and drop inbound messages whose
-  // `clientId` does not match.
-  const myClientId: string =
-    (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function')
-      ? (crypto as any).randomUUID()
-      : `cn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-
-  const sendToBackend = (payload: Record<string, unknown>) => {
-    ctx.sendToBackend({ ...payload, clientId: myClientId })
-  }
-
   let permissions: PermissionStatus | null = null
   let characters: CharacterInfo[] = []
   let configs: Record<string, NudgeConfig> = {}
@@ -826,7 +812,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       expandedCharacterId = isExpanded ? null : char.id
       if (!isExpanded) {
         draftConfigs[char.id] = { ...(configs[char.id] ?? getDefaultConfig()) }
-        sendToBackend({ type: 'get_chats', characterId: char.id })
+        ctx.sendToBackend({ type: 'get_chats', characterId: char.id })
       }
       render()
     })
@@ -903,7 +889,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     toggleInput.addEventListener('change', () => {
       draft.enabled = toggleInput.checked
       // Immediately save the toggle state
-      sendToBackend({ type: 'save_config', characterId: char.id, config: draft })
+      ctx.sendToBackend({ type: 'save_config', characterId: char.id, config: draft })
     })
     const slider = document.createElement('span')
     slider.className = 'cn-toggle-slider'
@@ -997,7 +983,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       d.maxTokens = clamp(d.maxTokens, 1, 131072)
       d.temperature = clamp(d.temperature, 0, 2)
       d.topP = clamp(d.topP, 0, 1)
-      sendToBackend({ type: 'save_config', characterId: char.id, config: d })
+      ctx.sendToBackend({ type: 'save_config', characterId: char.id, config: d })
     })
 
     const historyBtn = document.createElement('button')
@@ -1007,14 +993,14 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     historyBtn.style.alignItems = 'center'
     historyBtn.style.gap = '4px'
     historyBtn.addEventListener('click', () => {
-      sendToBackend({ type: 'get_nudge_history', characterId: char.id })
+      ctx.sendToBackend({ type: 'get_nudge_history', characterId: char.id })
     })
 
     const testBtn = document.createElement('button')
     testBtn.className = 'cn-btn'
     testBtn.textContent = 'Test Nudge'
     testBtn.addEventListener('click', () => {
-      sendToBackend({ type: 'trigger_test_nudge', characterId: char.id })
+      ctx.sendToBackend({ type: 'trigger_test_nudge', characterId: char.id })
     })
 
     btnRow.append(saveBtn, historyBtn, testBtn)
@@ -1115,7 +1101,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     expandBtn.innerHTML = expandSvg
     expandBtn.title = 'Open in expanded editor'
     expandBtn.addEventListener('click', () => {
-      sendToBackend({
+      ctx.sendToBackend({
         type: 'open_text_editor',
         title: label,
         value: textarea.value,
@@ -1139,9 +1125,6 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
   // ------------------------------------------
 
   const unsubBackend = ctx.onBackendMessage((payload: any) => {
-    // Operator-scoped extensions broadcast `sendToFrontend` to every connected
-    // session. Drop messages tagged for a different client (i.e. another user).
-    if (payload?.clientId && payload.clientId !== myClientId) return
     switch (payload.type) {
       case 'permissions_checked':
         permissions = payload
@@ -1229,9 +1212,9 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
   // ------------------------------------------
 
   const unsubTabActivate = tab.onActivate(() => {
-    sendToBackend({ type: 'check_permissions' })
-    sendToBackend({ type: 'get_characters' })
-    sendToBackend({ type: 'get_connections' })
+    ctx.sendToBackend({ type: 'check_permissions' })
+    ctx.sendToBackend({ type: 'get_characters' })
+    ctx.sendToBackend({ type: 'get_connections' })
   })
 
   // ------------------------------------------
@@ -1329,7 +1312,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     saveBtn.className = 'cn-btn cn-btn-primary'
     saveBtn.textContent = 'Save Defaults'
     saveBtn.addEventListener('click', () => {
-      sendToBackend({ type: 'save_globals', globals: { ...globals, ...g } })
+      ctx.sendToBackend({ type: 'save_globals', globals: { ...globals, ...g } })
     })
     panel.appendChild(saveBtn)
 
@@ -1353,11 +1336,11 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
   // ------------------------------------------
 
   queueMicrotask(() => {
-    sendToBackend({ type: 'check_permissions' })
-    sendToBackend({ type: 'get_characters' })
-    sendToBackend({ type: 'get_connections' })
-    sendToBackend({ type: 'get_defaults' })
-    sendToBackend({ type: 'get_globals' })
+    ctx.sendToBackend({ type: 'check_permissions' })
+    ctx.sendToBackend({ type: 'get_characters' })
+    ctx.sendToBackend({ type: 'get_connections' })
+    ctx.sendToBackend({ type: 'get_defaults' })
+    ctx.sendToBackend({ type: 'get_globals' })
   })
 
   render()
