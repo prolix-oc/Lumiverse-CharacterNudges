@@ -37,6 +37,13 @@ interface ConnectionProfile {
   model: string
 }
 
+interface NudgeHistoryEntry {
+  text: string
+  timestamp: number
+  characterName: string
+  chatId: string | null
+}
+
 interface PermissionStatus {
   hasPush: boolean
   hasGeneration: boolean
@@ -475,6 +482,42 @@ export function setup(ctx: SpindleFrontendContext) {
       color: var(--lumiverse-text-dim);
       font-size: 12px;
     }
+
+    /* ── History Modal (body content only — chrome provided by Spindle) ── */
+
+    .cn-history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .cn-history-entry {
+      padding: 10px 12px;
+      background: var(--lumiverse-fill-subtle);
+      border: 1px solid var(--lumiverse-border);
+      border-radius: var(--lumiverse-radius);
+    }
+
+    .cn-history-text {
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: var(--lumiverse-text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .cn-history-meta {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--lumiverse-text-dim);
+    }
+
+    .cn-history-empty {
+      padding: 24px 12px;
+      text-align: center;
+      color: var(--lumiverse-text-dim);
+      font-size: 12px;
+    }
   `)
 
   // ------------------------------------------
@@ -486,7 +529,72 @@ export function setup(ctx: SpindleFrontendContext) {
   const expandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`
   const searchSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`
 
+  const historySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`
+
   let searchQuery = ''
+
+  // ------------------------------------------
+  // History modal (uses Spindle modal API)
+  // ------------------------------------------
+
+  function formatRelativeTime(ts: number): string {
+    if (ts === 0) return 'Unknown date'
+    const diff = Date.now() - ts
+    const seconds = Math.floor(diff / 1000)
+    if (seconds < 60) return 'Just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    if (days < 30) return `${days}d ago`
+    return new Date(ts).toLocaleDateString()
+  }
+
+  let activeHistoryModal: ReturnType<typeof ctx.ui.showModal> | null = null
+
+  function dismissHistoryModal() {
+    if (activeHistoryModal) {
+      activeHistoryModal.dismiss()
+      activeHistoryModal = null
+    }
+  }
+
+  function showNudgeHistoryModal(characterName: string, entries: NudgeHistoryEntry[]) {
+    dismissHistoryModal()
+
+    const modal = ctx.ui.showModal({
+      title: `${characterName} — Nudge History`,
+    })
+    activeHistoryModal = modal
+    modal.onDismiss(() => { activeHistoryModal = null })
+
+    if (entries.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'cn-history-empty'
+      empty.textContent = 'No nudges have been sent yet for this character.'
+      modal.root.appendChild(empty)
+      return
+    }
+
+    const list = document.createElement('div')
+    list.className = 'cn-history-list'
+    // Show newest first
+    for (const entry of [...entries].reverse()) {
+      const card = document.createElement('div')
+      card.className = 'cn-history-entry'
+      const text = document.createElement('div')
+      text.className = 'cn-history-text'
+      text.textContent = entry.text
+      card.appendChild(text)
+      const meta = document.createElement('div')
+      meta.className = 'cn-history-meta'
+      meta.textContent = formatRelativeTime(entry.timestamp)
+      card.appendChild(meta)
+      list.appendChild(card)
+    }
+    modal.root.appendChild(list)
+  }
 
   // ------------------------------------------
   // Drawer tab
@@ -878,6 +986,16 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       ctx.sendToBackend({ type: 'save_config', characterId: char.id, config: d })
     })
 
+    const historyBtn = document.createElement('button')
+    historyBtn.className = 'cn-btn'
+    historyBtn.innerHTML = `${historySvg} History`
+    historyBtn.style.display = 'inline-flex'
+    historyBtn.style.alignItems = 'center'
+    historyBtn.style.gap = '4px'
+    historyBtn.addEventListener('click', () => {
+      ctx.sendToBackend({ type: 'get_nudge_history', characterId: char.id })
+    })
+
     const testBtn = document.createElement('button')
     testBtn.className = 'cn-btn'
     testBtn.textContent = 'Test Nudge'
@@ -885,7 +1003,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       ctx.sendToBackend({ type: 'trigger_test_nudge', characterId: char.id })
     })
 
-    btnRow.append(saveBtn, testBtn)
+    btnRow.append(saveBtn, historyBtn, testBtn)
     body.appendChild(btnRow)
 
     return body
@@ -1063,6 +1181,12 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
         renderSettings()
         break
 
+      case 'nudge_history_loaded': {
+        const charName = characters.find(c => c.id === payload.characterId)?.name ?? 'Character'
+        showNudgeHistoryModal(charName, payload.entries ?? [])
+        break
+      }
+
       case 'text_editor_result':
         if (payload.cancelled) break
         // Route to per-character draft if a character is expanded, otherwise to globals
@@ -1226,6 +1350,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
   // ------------------------------------------
 
   return () => {
+    dismissHistoryModal()
     unsubBackend()
     unsubTabActivate()
     unsubAction()

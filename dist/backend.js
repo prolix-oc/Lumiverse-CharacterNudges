@@ -62,14 +62,29 @@ function historyPath(characterId) {
   return `nudge-history/${characterId}.json`;
 }
 async function getNudgeHistory(characterId, userId) {
-  return spindle.userStorage.getJson(historyPath(characterId), {
+  const raw = await spindle.userStorage.getJson(historyPath(characterId), {
     fallback: [],
     userId
   });
+  if (raw.length > 0 && typeof raw[0] === "string") {
+    const migrated = raw.map((text) => ({
+      text,
+      timestamp: 0,
+      characterName: "",
+      chatId: null
+    }));
+    await spindle.userStorage.setJson(historyPath(characterId), migrated, { userId });
+    return migrated;
+  }
+  return raw;
 }
-async function appendNudgeHistory(characterId, text, userId) {
+async function getNudgeHistoryTexts(characterId, userId) {
+  const entries = await getNudgeHistory(characterId, userId);
+  return entries.map((e) => e.text);
+}
+async function appendNudgeHistory(characterId, text, characterName, chatId, userId) {
   const history = await getNudgeHistory(characterId, userId);
-  history.push(text);
+  history.push({ text, timestamp: Date.now(), characterName, chatId });
   const trimmed = history.slice(-MAX_HISTORY);
   await spindle.userStorage.setJson(historyPath(characterId), trimmed, { userId });
 }
@@ -163,7 +178,7 @@ async function executeNudge(characterId, config) {
       icon: character.image_id ? `/api/v1/images/${character.image_id}?size=sm` : undefined,
       rawTitle: true
     }, userId);
-    await appendNudgeHistory(characterId, nudgeText, userId);
+    await appendNudgeHistory(characterId, nudgeText, character.name, chatId, userId);
     spindle.log.info(`Sent nudge from "${character.name}": ${nudgeText.slice(0, 80)}...`);
     await scheduleNudge(characterId, userId);
   } catch (err) {
@@ -172,7 +187,7 @@ async function executeNudge(characterId, config) {
   }
 }
 async function buildNudgeMessages(config, chatId, characterId, recentMessages, userId) {
-  const history = await getNudgeHistory(characterId, userId);
+  const history = await getNudgeHistoryTexts(characterId, userId);
   function resolveLastNudges(text) {
     return text.replace(/\{\{lastNudges(?:::(\d+))?\}\}/g, (_match, countStr) => {
       const count = countStr ? parseInt(countStr, 10) : 5;
@@ -204,12 +219,23 @@ spindle.onFrontendMessage(async (payload, userId) => {
   switch (payload.type) {
     case "get_characters": {
       try {
-        const { data } = await spindle.characters.list({ limit: 200, userId });
+        const PAGE = 200;
+        const all = [];
+        let offset = 0;
+        let total = Infinity;
+        while (offset < total) {
+          const { data, total: t } = await spindle.characters.list({ limit: PAGE, offset, userId });
+          all.push(...data);
+          total = t;
+          offset += data.length;
+          if (data.length < PAGE)
+            break;
+        }
         const configs = {};
-        for (const c of data) {
+        for (const c of all) {
           configs[c.id] = await loadConfig(c.id, userId);
         }
-        spindle.sendToFrontend({ type: "characters_loaded", characters: data, configs });
+        spindle.sendToFrontend({ type: "characters_loaded", characters: all, configs });
       } catch (err) {
         spindle.sendToFrontend({ type: "characters_loaded", characters: [], configs: {}, error: err.message });
       }
@@ -359,6 +385,26 @@ spindle.onFrontendMessage(async (payload, userId) => {
         });
       } catch (err) {
         spindle.log.error(`Text editor failed: ${err.message}`);
+      }
+      break;
+    }
+    case "get_nudge_history": {
+      if (!payload.characterId)
+        break;
+      try {
+        const entries = await getNudgeHistory(payload.characterId, userId);
+        spindle.sendToFrontend({
+          type: "nudge_history_loaded",
+          characterId: payload.characterId,
+          entries
+        });
+      } catch (err) {
+        spindle.sendToFrontend({
+          type: "nudge_history_loaded",
+          characterId: payload.characterId,
+          entries: [],
+          error: err.message
+        });
       }
       break;
     }

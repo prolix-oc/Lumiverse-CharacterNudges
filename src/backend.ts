@@ -20,6 +20,13 @@ interface NudgeConfig {
   userId?: string
 }
 
+interface NudgeHistoryEntry {
+  text: string
+  timestamp: number
+  characterName: string
+  chatId: string | null
+}
+
 interface CharacterNudgeState {
   timerId: ReturnType<typeof setTimeout> | null
 }
@@ -114,16 +121,45 @@ function historyPath(characterId: string): string {
   return `nudge-history/${characterId}.json`
 }
 
-async function getNudgeHistory(characterId: string, userId?: string): Promise<string[]> {
-  return spindle.userStorage.getJson<string[]>(historyPath(characterId), {
+/**
+ * Load structured history, transparently migrating from the legacy string[]
+ * format if encountered. Each entry includes text, timestamp, character name,
+ * and the chat ID that was active when the nudge was sent.
+ */
+async function getNudgeHistory(characterId: string, userId?: string): Promise<NudgeHistoryEntry[]> {
+  const raw = await spindle.userStorage.getJson<unknown[]>(historyPath(characterId), {
     fallback: [],
     userId,
   })
+  // Migrate: if the first element is a plain string, the whole array is legacy
+  if (raw.length > 0 && typeof raw[0] === 'string') {
+    const migrated: NudgeHistoryEntry[] = (raw as string[]).map((text) => ({
+      text,
+      timestamp: 0,        // unknown — legacy entries
+      characterName: '',
+      chatId: null,
+    }))
+    await spindle.userStorage.setJson(historyPath(characterId), migrated, { userId })
+    return migrated
+  }
+  return raw as NudgeHistoryEntry[]
 }
 
-async function appendNudgeHistory(characterId: string, text: string, userId?: string): Promise<void> {
+/** Plain-text accessor used by the {{lastNudges}} macro and LLM prompt building. */
+async function getNudgeHistoryTexts(characterId: string, userId?: string): Promise<string[]> {
+  const entries = await getNudgeHistory(characterId, userId)
+  return entries.map((e) => e.text)
+}
+
+async function appendNudgeHistory(
+  characterId: string,
+  text: string,
+  characterName: string,
+  chatId: string | null,
+  userId?: string,
+): Promise<void> {
   const history = await getNudgeHistory(characterId, userId)
-  history.push(text)
+  history.push({ text, timestamp: Date.now(), characterName, chatId })
   const trimmed = history.slice(-MAX_HISTORY)
   await spindle.userStorage.setJson(historyPath(characterId), trimmed, { userId })
 }
@@ -252,7 +288,7 @@ async function executeNudge(characterId: string, config: NudgeConfig) {
       rawTitle: true,
     }, userId)
 
-    await appendNudgeHistory(characterId, nudgeText, userId)
+    await appendNudgeHistory(characterId, nudgeText, character.name, chatId, userId)
     spindle.log.info(`Sent nudge from "${character.name}": ${nudgeText.slice(0, 80)}...`)
     await scheduleNudge(characterId, userId)
   } catch (err: any) {
@@ -277,7 +313,7 @@ async function buildNudgeMessages(
   // Resolve {{lastNudges}} / {{lastNudges::N}} before passing to the
   // macro engine. We handle this ourselves since the macro engine's
   // push model doesn't support per-invocation args.
-  const history = await getNudgeHistory(characterId, userId)
+  const history = await getNudgeHistoryTexts(characterId, userId)
 
   function resolveLastNudges(text: string): string {
     return text.replace(/\{\{lastNudges(?:::(\d+))?\}\}/g, (_match, countStr) => {
@@ -318,13 +354,25 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
   switch (payload.type) {
     case 'get_characters': {
       try {
-        const { data } = await spindle.characters.list({ limit: 200, userId })
+        // Paginate through ALL characters — the API caps a single page,
+        // so users with large libraries would otherwise see only a fraction.
+        const PAGE = 200
+        const all: import('lumiverse-spindle-types').CharacterDTO[] = []
+        let offset = 0
+        let total = Infinity
+        while (offset < total) {
+          const { data, total: t } = await spindle.characters.list({ limit: PAGE, offset, userId })
+          all.push(...data)
+          total = t
+          offset += data.length
+          if (data.length < PAGE) break
+        }
         // For each character, load their config to know which ones have nudges enabled
         const configs: Record<string, NudgeConfig> = {}
-        for (const c of data) {
+        for (const c of all) {
           configs[c.id] = await loadConfig(c.id, userId)
         }
-        spindle.sendToFrontend({ type: 'characters_loaded', characters: data, configs })
+        spindle.sendToFrontend({ type: 'characters_loaded', characters: all, configs })
       } catch (err: any) {
         spindle.sendToFrontend({ type: 'characters_loaded', characters: [], configs: {}, error: err.message })
       }
@@ -488,6 +536,26 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
         })
       } catch (err: any) {
         spindle.log.error(`Text editor failed: ${err.message}`)
+      }
+      break
+    }
+
+    case 'get_nudge_history': {
+      if (!payload.characterId) break
+      try {
+        const entries = await getNudgeHistory(payload.characterId, userId)
+        spindle.sendToFrontend({
+          type: 'nudge_history_loaded',
+          characterId: payload.characterId,
+          entries,
+        })
+      } catch (err: any) {
+        spindle.sendToFrontend({
+          type: 'nudge_history_loaded',
+          characterId: payload.characterId,
+          entries: [],
+          error: err.message,
+        })
       }
       break
     }
