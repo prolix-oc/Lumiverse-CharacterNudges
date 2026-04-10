@@ -118,7 +118,7 @@ async function scheduleNudge(characterId, userId) {
   spindle.log.info(`Scheduled nudge for character ${characterId} in ${Math.round(delayMs / 60000)}m`);
 }
 async function executeNudge(characterId, config) {
-  const userId = currentUserId ?? config.userId ?? undefined;
+  const userId = config.userId ?? currentUserId ?? undefined;
   try {
     const visible = await spindle.users.isVisible(userId);
     if (visible) {
@@ -216,6 +216,11 @@ async function buildNudgeMessages(config, chatId, characterId, recentMessages, u
 }
 spindle.onFrontendMessage(async (payload, userId) => {
   currentUserId = userId;
+  const clientId = payload?.clientId;
+  const reply = (msg) => {
+    const broadcast = spindle.sendToFrontend.bind(spindle);
+    broadcast({ ...msg, clientId });
+  };
   switch (payload.type) {
     case "get_characters": {
       try {
@@ -235,9 +240,9 @@ spindle.onFrontendMessage(async (payload, userId) => {
         for (const c of all) {
           configs[c.id] = await loadConfig(c.id, userId);
         }
-        spindle.sendToFrontend({ type: "characters_loaded", characters: all, configs });
+        reply({ type: "characters_loaded", characters: all, configs });
       } catch (err) {
-        spindle.sendToFrontend({ type: "characters_loaded", characters: [], configs: {}, error: err.message });
+        reply({ type: "characters_loaded", characters: [], configs: {}, error: err.message });
       }
       break;
     }
@@ -248,13 +253,13 @@ spindle.onFrontendMessage(async (payload, userId) => {
           limit: 50,
           userId
         });
-        spindle.sendToFrontend({
+        reply({
           type: "chats_loaded",
           characterId: payload.characterId,
           chats: data
         });
       } catch (err) {
-        spindle.sendToFrontend({
+        reply({
           type: "chats_loaded",
           characterId: payload.characterId,
           chats: [],
@@ -265,7 +270,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
     }
     case "get_config": {
       const config = await loadConfig(payload.characterId, userId);
-      spindle.sendToFrontend({
+      reply({
         type: "config_loaded",
         characterId: payload.characterId,
         config
@@ -289,7 +294,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
           userId
         };
         await saveConfig(payload.characterId, config, userId);
-        spindle.sendToFrontend({
+        reply({
           type: "config_saved",
           characterId: payload.characterId,
           config
@@ -311,9 +316,9 @@ spindle.onFrontendMessage(async (payload, userId) => {
     case "get_connections": {
       try {
         const connections = await spindle.connections.list(userId);
-        spindle.sendToFrontend({ type: "connections_loaded", connections });
+        reply({ type: "connections_loaded", connections });
       } catch (err) {
-        spindle.sendToFrontend({ type: "connections_loaded", connections: [], error: err.message });
+        reply({ type: "connections_loaded", connections: [], error: err.message });
       }
       break;
     }
@@ -328,7 +333,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
           pushDevices = pushStatus.subscriptionCount;
         } catch {}
       }
-      spindle.sendToFrontend({
+      reply({
         type: "permissions_checked",
         hasPush: granted.includes("push_notification"),
         hasGeneration: granted.includes("generation"),
@@ -342,7 +347,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
     }
     case "get_globals": {
       const globals = await loadGlobals(userId);
-      spindle.sendToFrontend({ type: "globals_loaded", globals: { ...DEFAULT_CONFIG, ...globals } });
+      reply({ type: "globals_loaded", globals: { ...DEFAULT_CONFIG, ...globals } });
       break;
     }
     case "save_globals": {
@@ -358,12 +363,12 @@ spindle.onFrontendMessage(async (payload, userId) => {
         nudgeInstruction: payload.globals.nudgeInstruction ?? DEFAULT_NUDGE_INSTRUCTION
       };
       await saveGlobals(globals, userId);
-      spindle.sendToFrontend({ type: "globals_saved", globals: { ...DEFAULT_CONFIG, ...globals } });
+      reply({ type: "globals_saved", globals: { ...DEFAULT_CONFIG, ...globals } });
       spindle.toast.success("Global defaults saved");
       break;
     }
     case "get_defaults": {
-      spindle.sendToFrontend({
+      reply({
         type: "defaults",
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         nudgeInstruction: DEFAULT_NUDGE_INSTRUCTION
@@ -377,7 +382,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
           value: payload.value ?? "",
           userId
         });
-        spindle.sendToFrontend({
+        reply({
           type: "text_editor_result",
           text: result.text,
           cancelled: result.cancelled,
@@ -393,13 +398,13 @@ spindle.onFrontendMessage(async (payload, userId) => {
         break;
       try {
         const entries = await getNudgeHistory(payload.characterId, userId);
-        spindle.sendToFrontend({
+        reply({
           type: "nudge_history_loaded",
           characterId: payload.characterId,
           entries
         });
       } catch (err) {
-        spindle.sendToFrontend({
+        reply({
           type: "nudge_history_loaded",
           characterId: payload.characterId,
           entries: [],
