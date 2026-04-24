@@ -65,12 +65,15 @@ const DEFAULT_CONFIG: NudgeConfig = {
   nudgeInstruction: DEFAULT_NUDGE_INSTRUCTION,
 }
 
+function toastOptions(userId: string): { userId: string } {
+  return { userId }
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
 const nudgeStates = new Map<string, CharacterNudgeState>()
-let currentUserId: string | null = null
 
 // ---------------------------------------------------------------------------
 // Config helpers — all storage is per-user via userStorage
@@ -189,36 +192,37 @@ function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function clearNudgeTimer(characterId: string) {
-  const state = nudgeStates.get(characterId)
+function nudgeStateKey(characterId: string, userId: string): string {
+  return `${userId}:${characterId}`
+}
+
+function clearNudgeTimer(characterId: string, userId: string) {
+  const state = nudgeStates.get(nudgeStateKey(characterId, userId))
   if (state?.timerId) {
     clearTimeout(state.timerId)
     state.timerId = null
   }
 }
 
-async function scheduleNudge(characterId: string, userId?: string) {
-  clearNudgeTimer(characterId)
+async function scheduleNudge(characterId: string, userId: string) {
+  clearNudgeTimer(characterId, userId)
 
-  const config = await loadConfig(characterId, userId)
+  const config: NudgeConfig = { ...(await loadConfig(characterId, userId)), userId }
   if (!config.enabled) return
 
   const delayMs = randomBetween(config.minMinutes, config.maxMinutes) * 60 * 1000
+  const key = nudgeStateKey(characterId, userId)
 
-  const state: CharacterNudgeState = nudgeStates.get(characterId) ?? { timerId: null }
-  state.timerId = setTimeout(() => executeNudge(characterId, config), delayMs)
-  nudgeStates.set(characterId, state)
+  const state: CharacterNudgeState = nudgeStates.get(key) ?? { timerId: null }
+  state.timerId = setTimeout(() => executeNudge(characterId, config, userId), delayMs)
+  nudgeStates.set(key, state)
 
   spindle.log.info(
     `Scheduled nudge for character ${characterId} in ${Math.round(delayMs / 60000)}m`,
   )
 }
 
-async function executeNudge(characterId: string, config: NudgeConfig) {
-  // Prefer the persisted owner — `currentUserId` is mutable global state that
-  // any user's frontend message can clobber, so it's unsafe to trust here.
-  const userId = config.userId ?? currentUserId ?? undefined
-
+async function executeNudge(characterId: string, config: NudgeConfig, userId: string) {
   try {
     const visible = await spindle.users.isVisible(userId)
     if (visible) {
@@ -236,7 +240,7 @@ async function executeNudge(characterId: string, config: NudgeConfig) {
     const chatId = await resolveChatId(characterId, config.chatId, userId)
     if (!chatId) {
       spindle.log.warn(`No chat found for character ${characterId}, skipping nudge`)
-      await scheduleNudge(characterId)
+      await scheduleNudge(characterId, userId)
       return
     }
 
@@ -351,8 +355,6 @@ async function buildNudgeMessages(
 // ---------------------------------------------------------------------------
 
 spindle.onFrontendMessage(async (payload: any, userId: string) => {
-  currentUserId = userId
-
   // Route every reply to the originating user. Without the userId argument,
   // operator-scoped extensions broadcast `sendToFrontend` to every connected
   // session, which leaks one user's data into another user's UI.
@@ -447,14 +449,14 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
         await setRegistryEntry(payload.characterId, userId, config.enabled)
         if (config.enabled) {
           await scheduleNudge(payload.characterId, userId)
-          spindle.toast.success(`Nudges enabled for this character`)
+          spindle.toast.success(`Nudges enabled for this character`, toastOptions(userId) as any)
         } else {
-          clearNudgeTimer(payload.characterId)
-          spindle.toast.info(`Nudges disabled for this character`)
+          clearNudgeTimer(payload.characterId, userId)
+          spindle.toast.info(`Nudges disabled for this character`, toastOptions(userId) as any)
         }
       } catch (err: any) {
         spindle.log.error(`Failed to save config: ${err.message}`)
-        spindle.toast.error(`Failed to save: ${err.message}`)
+        spindle.toast.error(`Failed to save: ${err.message}`, toastOptions(userId) as any)
       }
       break
     }
@@ -516,7 +518,7 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
       }
       await saveGlobals(globals, userId)
       reply({ type: 'globals_saved', globals: { ...DEFAULT_CONFIG, ...globals } })
-      spindle.toast.success('Global defaults saved')
+      spindle.toast.success('Global defaults saved', toastOptions(userId) as any)
       break
     }
 
@@ -572,9 +574,9 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
     case 'trigger_test_nudge': {
       if (!payload.characterId) break
       const config = await loadConfig(payload.characterId, userId)
-      spindle.toast.info('Test nudge will fire in 15 seconds — switch away from the app to see it.')
+      spindle.toast.info('Test nudge will fire in 15 seconds — switch away from the app to see it.', toastOptions(userId) as any)
       setTimeout(() => {
-        executeNudge(payload.characterId, { ...config, enabled: true })
+        void executeNudge(payload.characterId, { ...config, enabled: true, userId }, userId)
       }, 15_000)
       break
     }
@@ -585,27 +587,25 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
 // Event-driven rescheduling
 // ---------------------------------------------------------------------------
 
-spindle.on('MESSAGE_SENT', async (payload: any) => {
+spindle.on('MESSAGE_SENT', async (payload: any, userId?: string) => {
   const chatId = payload.chatId
-  const uid = currentUserId ?? undefined
-  if (!chatId) return
+  if (!chatId || !userId) return
   try {
-    const chat = await spindle.chats.get(chatId, uid)
+    const chat = await spindle.chats.get(chatId, userId)
     if (!chat) return
-    const config = await loadConfig(chat.character_id, uid)
-    if (config.enabled) await scheduleNudge(chat.character_id, uid)
+    const config = await loadConfig(chat.character_id, userId)
+    if (config.enabled) await scheduleNudge(chat.character_id, userId)
   } catch { /* ignore */ }
 })
 
-spindle.on('GENERATION_ENDED', async (payload: any) => {
+spindle.on('GENERATION_ENDED', async (payload: any, userId?: string) => {
   const chatId = payload.chatId
-  const uid = currentUserId ?? undefined
-  if (!chatId) return
+  if (!chatId || !userId) return
   try {
-    const chat = await spindle.chats.get(chatId, uid)
+    const chat = await spindle.chats.get(chatId, userId)
     if (!chat) return
-    const config = await loadConfig(chat.character_id, uid)
-    if (config.enabled) await scheduleNudge(chat.character_id, uid)
+    const config = await loadConfig(chat.character_id, userId)
+    if (config.enabled) await scheduleNudge(chat.character_id, userId)
   } catch { /* ignore */ }
 })
 
@@ -639,7 +639,6 @@ async function resumeEnabledNudges() {
     const registry = await getActiveRegistry()
     for (const [characterId, userId] of Object.entries(registry)) {
       if (!characterId || !userId) continue
-      currentUserId = userId  // Set so downstream calls have it
       const config = await loadConfig(characterId, userId)
       if (config.enabled) {
         await scheduleNudge(characterId, userId)
