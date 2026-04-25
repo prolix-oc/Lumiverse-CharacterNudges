@@ -54,6 +54,8 @@ interface PermissionStatus {
   pushDevices: number
 }
 
+type NudgeStatusTab = 'inactive' | 'active'
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -65,6 +67,7 @@ export function setup(ctx: SpindleFrontendContext) {
   let connections: ConnectionProfile[] = []
   let chatsPerCharacter: Record<string, ChatInfo[]> = {}
   let expandedCharacterId: string | null = null
+  let activeNudgeTab: NudgeStatusTab = 'inactive'
   let defaultPrompts: { systemPrompt: string; nudgeInstruction: string } | null = null
 
   // Mutable draft configs for unsaved changes in the accordion
@@ -476,6 +479,59 @@ export function setup(ctx: SpindleFrontendContext) {
       border-color: var(--lumiverse-accent);
     }
 
+    .cn-status-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 3px;
+      background: var(--lumiverse-fill);
+      border: 1px solid var(--lumiverse-border);
+      border-radius: var(--lumiverse-radius);
+    }
+
+    .cn-status-tab {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: calc(var(--lumiverse-radius) - 2px);
+      background: transparent;
+      color: var(--lumiverse-text-dim);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background var(--lumiverse-transition-fast),
+                  color var(--lumiverse-transition-fast);
+    }
+
+    .cn-status-tab:hover {
+      color: var(--lumiverse-text);
+      background: var(--lumiverse-fill-subtle);
+    }
+
+    .cn-status-tab-active {
+      background: var(--lumiverse-fill-subtle);
+      color: var(--lumiverse-text);
+      box-shadow: inset 0 0 0 1px var(--lumiverse-border);
+    }
+
+    .cn-status-tab-count {
+      min-width: 18px;
+      padding: 1px 5px;
+      border-radius: 999px;
+      background: var(--lumiverse-fill-subtle);
+      color: var(--lumiverse-text-dim);
+      font-size: 10px;
+      line-height: 1.4;
+    }
+
+    .cn-status-tab-active .cn-status-tab-count {
+      background: var(--lumiverse-accent);
+      color: var(--lumiverse-accent-fg);
+    }
+
     .cn-empty {
       padding: 20px 12px;
       text-align: center;
@@ -737,21 +793,46 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       return
     }
 
-    // Filter and sort: enabled first, then alphabetical
+    // Filter into saved-state tabs, then sort alphabetically inside each tab.
     const query = searchQuery.toLowerCase()
-    const sorted = [...characters]
+    const matching = [...characters]
       .filter((c) => !query || c.name.toLowerCase().includes(query))
-      .sort((a, b) => {
-        const aOn = configs[a.id]?.enabled ? 1 : 0
-        const bOn = configs[b.id]?.enabled ? 1 : 0
-        if (aOn !== bOn) return bOn - aOn
-        return a.name.localeCompare(b.name)
-      })
 
-    if (sorted.length === 0 && query) {
+    const activeCount = matching.filter((c) => configs[c.id]?.enabled).length
+    const inactiveCount = matching.length - activeCount
+
+    const tabs = document.createElement('div')
+    tabs.className = 'cn-status-tabs'
+    for (const tabInfo of [
+      { id: 'inactive' as const, label: 'Inactive', count: inactiveCount },
+      { id: 'active' as const, label: 'Active', count: activeCount },
+    ]) {
+      const tabBtn = document.createElement('button')
+      tabBtn.type = 'button'
+      tabBtn.className = `cn-status-tab ${activeNudgeTab === tabInfo.id ? 'cn-status-tab-active' : ''}`
+      tabBtn.setAttribute('aria-pressed', String(activeNudgeTab === tabInfo.id))
+      tabBtn.innerHTML = `<span>${tabInfo.label}</span><span class="cn-status-tab-count">${tabInfo.count}</span>`
+      tabBtn.addEventListener('click', () => {
+        activeNudgeTab = tabInfo.id
+        expandedCharacterId = null
+        render()
+      })
+      tabs.appendChild(tabBtn)
+    }
+    panel.appendChild(tabs)
+
+    const sorted = matching
+      .filter((c) => activeNudgeTab === 'active' ? configs[c.id]?.enabled : !configs[c.id]?.enabled)
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    if (sorted.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'cn-empty'
-      empty.textContent = 'No characters match your search.'
+      empty.textContent = query
+        ? 'No characters match your search in this tab.'
+        : activeNudgeTab === 'active'
+          ? 'No active nudges yet. Enable a character and hit Save to move them here.'
+          : 'All matching characters already have nudges enabled.'
       panel.appendChild(empty)
       tab.root.appendChild(panel)
       return
@@ -888,8 +969,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     toggleInput.checked = draft.enabled
     toggleInput.addEventListener('change', () => {
       draft.enabled = toggleInput.checked
-      // Immediately save the toggle state
-      ctx.sendToBackend({ type: 'save_config', characterId: char.id, config: draft })
+      render()
     })
     const slider = document.createElement('span')
     slider.className = 'cn-toggle-slider'
@@ -898,6 +978,13 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     enableRow.appendChild(enableLabel)
     enableRow.appendChild(toggle)
     body.appendChild(enableRow)
+
+    if (draft.enabled !== Boolean(configs[char.id]?.enabled)) {
+      const pending = document.createElement('div')
+      pending.className = 'cn-sublabel'
+      pending.textContent = 'This status change will apply when you save.'
+      body.appendChild(pending)
+    }
 
     // Chat selector
     body.appendChild(makeSelect('Chat', 'Which chat to pull context from',
@@ -1159,6 +1246,9 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       case 'config_saved':
         configs[payload.characterId] = payload.config
         draftConfigs[payload.characterId] = { ...payload.config }
+        if (expandedCharacterId === payload.characterId) {
+          activeNudgeTab = payload.config.enabled ? 'active' : 'inactive'
+        }
         render()
         break
 

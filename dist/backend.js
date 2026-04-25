@@ -175,7 +175,7 @@ async function executeNudge(characterId, config, userId) {
     if (nudgeText.startsWith(namePrefix)) {
       nudgeText = nudgeText.slice(namePrefix.length).trim();
     }
-    await spindle.push.send({
+    const { sent } = await spindle.push.send({
       title: character.name,
       body: nudgeText,
       tag: `nudge-${characterId}`,
@@ -183,6 +183,11 @@ async function executeNudge(characterId, config, userId) {
       icon: character.image_id ? `/api/v1/images/${character.image_id}?size=sm` : undefined,
       rawTitle: true
     }, userId);
+    if (sent <= 0) {
+      spindle.log.info(`Push suppressed or unavailable for "${character.name}", skipping nudge history`);
+      await scheduleNudge(characterId, userId);
+      return;
+    }
     await appendNudgeHistory(characterId, nudgeText, character.name, chatId, userId);
     spindle.log.info(`Sent nudge from "${character.name}": ${nudgeText.slice(0, 80)}...`);
     await scheduleNudge(characterId, userId);
