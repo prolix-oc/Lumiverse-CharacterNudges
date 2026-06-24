@@ -55,12 +55,74 @@ interface PermissionStatus {
 }
 
 type NudgeStatusTab = 'inactive' | 'active'
+const READY_MIN_VERSION = [1, 0, 6] as const
+
+function parseVersionSegment(segment: string | undefined): number {
+  if (!segment) return 0
+  const match = segment.match(/\d+/)
+  return match ? Number(match[0]) : 0
+}
+
+function isVersionAtLeast(version: string, minimum: readonly number[]): boolean {
+  const parts = version.split('.')
+  for (let index = 0; index < minimum.length; index += 1) {
+    const current = parseVersionSegment(parts[index])
+    const required = minimum[index]
+    if (current > required) return true
+    if (current < required) return false
+  }
+  return true
+}
+
+async function shouldBroadcastReadyForHost(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/v1/system/info', { credentials: 'same-origin' })
+    if (!response.ok) return true
+    const payload = await response.json() as { backend?: { version?: unknown } }
+    const version = typeof payload?.backend?.version === 'string' ? payload.backend.version : null
+    return version ? isVersionAtLeast(version, READY_MIN_VERSION) : true
+  } catch {
+    return true
+  }
+}
+
+function createReadyGate(ctx: SpindleFrontendContext) {
+  if (typeof ctx.deferReady !== 'function' || typeof ctx.ready !== 'function') {
+    return {
+      dispose() {},
+      release() {},
+    }
+  }
+
+  ctx.deferReady()
+  const shouldBroadcastReady = shouldBroadcastReadyForHost()
+  let disposed = false
+  let released = false
+
+  return {
+    dispose() {
+      disposed = true
+    },
+    release() {
+      if (disposed || released) return
+      released = true
+      void shouldBroadcastReady.then((allowed) => {
+        if (!disposed && allowed) {
+          ctx.ready()
+        }
+      })
+    },
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
 export function setup(ctx: SpindleFrontendContext) {
+  // Lumiverse 1.0.6+ can explicitly release queued startup events once the
+  // frontend has registered its handlers and issued its initial requests.
+  const readyGate = createReadyGate(ctx)
   let permissions: PermissionStatus | null = null
   let characters: CharacterInfo[] = []
   let configs: Record<string, NudgeConfig> = {}
@@ -1434,12 +1496,14 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
   })
 
   render()
+  readyGate.release()
 
   // ------------------------------------------
   // Cleanup
   // ------------------------------------------
 
   return () => {
+    readyGate.dispose()
     dismissHistoryModal()
     unsubBackend()
     unsubTabActivate()

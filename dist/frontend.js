@@ -1,5 +1,64 @@
 // src/frontend.ts
+var READY_MIN_VERSION = [1, 0, 6];
+function parseVersionSegment(segment) {
+  if (!segment)
+    return 0;
+  const match = segment.match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+function isVersionAtLeast(version, minimum) {
+  const parts = version.split(".");
+  for (let index = 0;index < minimum.length; index += 1) {
+    const current = parseVersionSegment(parts[index]);
+    const required = minimum[index];
+    if (current > required)
+      return true;
+    if (current < required)
+      return false;
+  }
+  return true;
+}
+async function shouldBroadcastReadyForHost() {
+  try {
+    const response = await fetch("/api/v1/system/info", { credentials: "same-origin" });
+    if (!response.ok)
+      return true;
+    const payload = await response.json();
+    const version = typeof payload?.backend?.version === "string" ? payload.backend.version : null;
+    return version ? isVersionAtLeast(version, READY_MIN_VERSION) : true;
+  } catch {
+    return true;
+  }
+}
+function createReadyGate(ctx) {
+  if (typeof ctx.deferReady !== "function" || typeof ctx.ready !== "function") {
+    return {
+      dispose() {},
+      release() {}
+    };
+  }
+  ctx.deferReady();
+  const shouldBroadcastReady = shouldBroadcastReadyForHost();
+  let disposed = false;
+  let released = false;
+  return {
+    dispose() {
+      disposed = true;
+    },
+    release() {
+      if (disposed || released)
+        return;
+      released = true;
+      shouldBroadcastReady.then((allowed) => {
+        if (!disposed && allowed) {
+          ctx.ready();
+        }
+      });
+    }
+  };
+}
 function setup(ctx) {
+  const readyGate = createReadyGate(ctx);
   let permissions = null;
   let characters = [];
   let configs = {};
@@ -1231,7 +1290,9 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
     ctx.sendToBackend({ type: "get_globals" });
   });
   render();
+  readyGate.release();
   return () => {
+    readyGate.dispose();
     dismissHistoryModal();
     unsubBackend();
     unsubTabActivate();

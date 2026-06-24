@@ -5,13 +5,13 @@
     "": {
       "name": "character-nudges",
       "devDependencies": {
-        "lumiverse-spindle-types": "^0.4.19",
+        "lumiverse-spindle-types": "0.5.26",
         "typescript": "^6.0.2",
       },
     },
   },
   "packages": {
-    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.4.19", "", {}, "sha512-t0T/nSLEf8RTwRJS8GK/90ibz3RHuQJZ5xM3vY17LDFs02o/YcIRuqMphTuU3lFMsmxuQ4Eji9Vc3ld9eXz16g=="],
+    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.5.26", "", {}, "sha512-eeW3EeWPwafuGy/JIFPURAdeFK32Un5fuuiS0FwNIg77ehXpbxucm9QWHxZ4FmSzv1/dipk5zKy4XgPcNahp1A=="],
 
     "typescript": ["typescript@6.0.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-bGdAIrZ0wiGDo5l8c++HWtbaNCWTS4UTv7RaTH/ThVIgjkveJt83m74bBHMJkuCbslY8ixgLBVZJIOiQlQTjfQ=="],
   }
