@@ -591,44 +591,120 @@ function setup(ctx) {
     return new Date(ts).toLocaleDateString();
   }
   let activeHistoryModal = null;
+  const pendingHistoryClears = new Set;
   function dismissHistoryModal() {
-    if (activeHistoryModal) {
-      activeHistoryModal.dismiss();
-      activeHistoryModal = null;
-    }
+    const current = activeHistoryModal;
+    activeHistoryModal = null;
+    current?.modal.dismiss();
   }
-  function showNudgeHistoryModal(characterName, entries) {
+  function showNudgeHistoryModal(characterId, characterName, entries, loadError) {
     dismissHistoryModal();
     const modal = ctx.ui.showModal({
       title: `${characterName} — Nudge History`
     });
-    activeHistoryModal = modal;
+    let confirming = false;
+    let clearError;
+    function renderHistory() {
+      modal.root.replaceChildren();
+      if (loadError) {
+        const error = document.createElement("div");
+        error.className = "cn-history-empty";
+        error.setAttribute("role", "alert");
+        error.textContent = `Unable to load history: ${loadError}`;
+        modal.root.appendChild(error);
+        return;
+      }
+      if (entries.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "cn-history-empty";
+        empty.textContent = "No nudges have been sent yet for this character.";
+        modal.root.appendChild(empty);
+        return;
+      }
+      const controls = document.createElement("div");
+      controls.className = "cn-history-entry";
+      controls.style.marginBottom = "8px";
+      const pending = pendingHistoryClears.has(characterId);
+      if (confirming || pending || clearError) {
+        const message = document.createElement("div");
+        message.className = "cn-history-text";
+        message.style.marginBottom = "8px";
+        if (clearError)
+          message.setAttribute("role", "alert");
+        else
+          message.setAttribute("role", "status");
+        message.textContent = clearError ? `Unable to clear history: ${clearError}` : pending ? "Clearing history…" : "Permanently clear this character’s nudge history? This cannot be undone.";
+        controls.appendChild(message);
+      }
+      const buttons = document.createElement("div");
+      buttons.className = "cn-btn-row";
+      const clearButton = document.createElement("button");
+      clearButton.className = "cn-btn";
+      clearButton.textContent = pending ? "Clearing…" : confirming ? "Confirm Clear" : "Clear History";
+      clearButton.disabled = pending;
+      clearButton.addEventListener("click", () => {
+        if (pendingHistoryClears.has(characterId))
+          return;
+        clearError = undefined;
+        if (!confirming) {
+          confirming = true;
+          renderHistory();
+          return;
+        }
+        pendingHistoryClears.add(characterId);
+        renderHistory();
+        ctx.sendToBackend({ type: "clear_nudge_history", characterId });
+      });
+      buttons.appendChild(clearButton);
+      if (confirming || pending) {
+        const cancelButton = document.createElement("button");
+        cancelButton.className = "cn-btn";
+        cancelButton.textContent = "Cancel";
+        cancelButton.disabled = pending;
+        cancelButton.addEventListener("click", () => {
+          confirming = false;
+          clearError = undefined;
+          renderHistory();
+        });
+        buttons.appendChild(cancelButton);
+      }
+      controls.appendChild(buttons);
+      modal.root.appendChild(controls);
+      const list = document.createElement("div");
+      list.className = "cn-history-list";
+      for (const entry of [...entries].reverse()) {
+        const card = document.createElement("div");
+        card.className = "cn-history-entry";
+        const text = document.createElement("div");
+        text.className = "cn-history-text";
+        text.textContent = entry.text;
+        card.appendChild(text);
+        const meta = document.createElement("div");
+        meta.className = "cn-history-meta";
+        meta.textContent = formatRelativeTime(entry.timestamp);
+        card.appendChild(meta);
+        list.appendChild(card);
+      }
+      modal.root.appendChild(list);
+    }
+    activeHistoryModal = {
+      modal,
+      characterId,
+      finishClear(error) {
+        clearError = error;
+        if (!error) {
+          entries = [];
+          loadError = undefined;
+          confirming = false;
+        }
+        renderHistory();
+      }
+    };
     modal.onDismiss(() => {
-      activeHistoryModal = null;
+      if (activeHistoryModal?.modal === modal)
+        activeHistoryModal = null;
     });
-    if (entries.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "cn-history-empty";
-      empty.textContent = "No nudges have been sent yet for this character.";
-      modal.root.appendChild(empty);
-      return;
-    }
-    const list = document.createElement("div");
-    list.className = "cn-history-list";
-    for (const entry of [...entries].reverse()) {
-      const card = document.createElement("div");
-      card.className = "cn-history-entry";
-      const text = document.createElement("div");
-      text.className = "cn-history-text";
-      text.textContent = entry.text;
-      card.appendChild(text);
-      const meta = document.createElement("div");
-      meta.className = "cn-history-meta";
-      meta.textContent = formatRelativeTime(entry.timestamp);
-      card.appendChild(meta);
-      list.appendChild(card);
-    }
-    modal.root.appendChild(list);
+    renderHistory();
   }
   const tab = ctx.ui.registerDrawerTab({
     id: "nudges",
@@ -1152,7 +1228,14 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
         break;
       case "nudge_history_loaded": {
         const charName = characters.find((c) => c.id === payload.characterId)?.name ?? "Character";
-        showNudgeHistoryModal(charName, payload.entries ?? []);
+        showNudgeHistoryModal(payload.characterId, charName, payload.entries ?? [], payload.error);
+        break;
+      }
+      case "nudge_history_cleared": {
+        pendingHistoryClears.delete(payload.characterId);
+        if (activeHistoryModal?.characterId === payload.characterId) {
+          activeHistoryModal.finishClear(payload.error);
+        }
         break;
       }
       case "text_editor_result":

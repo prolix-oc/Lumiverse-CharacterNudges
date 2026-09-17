@@ -222,12 +222,12 @@ async function scheduleNudge(characterId: string, userId: string) {
   )
 }
 
-async function executeNudge(characterId: string, config: NudgeConfig, userId: string) {
+async function executeNudge(characterId: string, config: NudgeConfig, userId: string, isTest = false) {
   try {
     const visible = await spindle.users.isVisible(userId)
     if (visible) {
-      spindle.log.info(`User has app visible, skipping nudge for ${characterId} — rescheduling`)
-      await scheduleNudge(characterId, userId)
+      spindle.log.info(`User has app visible, skipping nudge for ${characterId}${isTest ? '' : ' — rescheduling'}`)
+      if (!isTest) await scheduleNudge(characterId, userId)
       return
     }
 
@@ -240,7 +240,7 @@ async function executeNudge(characterId: string, config: NudgeConfig, userId: st
     const chatId = await resolveChatId(characterId, config.chatId, userId)
     if (!chatId) {
       spindle.log.warn(`No chat found for character ${characterId}, skipping nudge`)
-      await scheduleNudge(characterId, userId)
+      if (!isTest) await scheduleNudge(characterId, userId)
       return
     }
 
@@ -275,7 +275,7 @@ async function executeNudge(characterId: string, config: NudgeConfig, userId: st
 
     if (!content) {
       spindle.log.warn('Empty generation result for nudge')
-      await scheduleNudge(characterId, userId)
+      if (!isTest) await scheduleNudge(characterId, userId)
       return
     }
 
@@ -296,16 +296,16 @@ async function executeNudge(characterId: string, config: NudgeConfig, userId: st
 
     if (sent <= 0) {
       spindle.log.info(`Push suppressed or unavailable for "${character.name}", skipping nudge history`)
-      await scheduleNudge(characterId, userId)
+      if (!isTest) await scheduleNudge(characterId, userId)
       return
     }
 
-    await appendNudgeHistory(characterId, nudgeText, character.name, chatId, userId)
-    spindle.log.info(`Sent nudge from "${character.name}": ${nudgeText.slice(0, 80)}...`)
-    await scheduleNudge(characterId, userId)
+    if (!isTest) await appendNudgeHistory(characterId, nudgeText, character.name, chatId, userId)
+    spindle.log.info(`Sent ${isTest ? 'test nudge' : 'nudge'} from "${character.name}": ${nudgeText.slice(0, 80)}...`)
+    if (!isTest) await scheduleNudge(characterId, userId)
   } catch (err: any) {
     spindle.log.error(`Nudge execution failed: ${err.message}`)
-    await scheduleNudge(characterId, userId)
+    if (!isTest) await scheduleNudge(characterId, userId)
   }
 }
 
@@ -577,12 +577,23 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
       break
     }
 
+    case 'clear_nudge_history': {
+      if (!payload.characterId) break
+      try {
+        await spindle.userStorage.setJson(historyPath(payload.characterId), [], { userId })
+        reply({ type: 'nudge_history_cleared', characterId: payload.characterId })
+      } catch (err: unknown) {
+        reply({ type: 'nudge_history_cleared', characterId: payload.characterId, error: err instanceof Error ? err.message : String(err) })
+      }
+      break
+    }
+
     case 'trigger_test_nudge': {
       if (!payload.characterId) break
       const config = await loadConfig(payload.characterId, userId)
       spindle.toast.info('Test nudge will fire in 15 seconds — switch away from the app to see it.', toastOptions(userId) as any)
       setTimeout(() => {
-        void executeNudge(payload.characterId, { ...config, enabled: true, userId }, userId)
+        void executeNudge(payload.characterId, { ...config, enabled: true, userId }, userId, true)
       }, 15_000)
       break
     }
