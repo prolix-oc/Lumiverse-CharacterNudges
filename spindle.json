@@ -1,8 +1,8 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.7",
   "name": "Character Nudges",
   "identifier": "character_nudges",
-  "author": "Lumiverse",
+  "author": "Prolix",
   "github": "https://github.com/prolix-oc/Lumiverse-CharacterNudges",
   "homepage": "https://github.com/prolix-oc/Lumiverse-CharacterNudges",
   "description": "Characters send you push notifications when you've been away, as if they miss you and want you to come back to the chat.",
