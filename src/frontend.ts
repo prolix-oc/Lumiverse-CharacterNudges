@@ -1,4 +1,5 @@
 import type { SpindleFrontendContext, SpindleModalHandle } from 'lumiverse-spindle-types'
+import { toCharacterInfo, type CharacterInfo } from './character-info'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,12 +17,6 @@ interface NudgeConfig {
   topP: number
   systemPrompt: string
   nudgeInstruction: string
-}
-
-interface CharacterInfo {
-  id: string
-  name: string
-  image_id: string | null
 }
 
 interface ChatInfo {
@@ -1366,7 +1361,8 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
         break
 
       case 'characters_loaded':
-        characters = payload.characters ?? []
+        // Also discard unused fields if an older backend sends full cards.
+        characters = (payload.characters ?? []).map(toCharacterInfo)
         configs = payload.configs ?? {}
         draftConfigs = {}
         render()
@@ -1426,7 +1422,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
 
       case 'nudge_history_cleared': {
         pendingHistoryClears.delete(payload.characterId)
-        if (activeHistoryModal?.characterId === payload.characterId) {
+        if (activeHistoryModal && activeHistoryModal.characterId === payload.characterId) {
           activeHistoryModal.finishClear(payload.error)
         }
         break

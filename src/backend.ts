@@ -1,3 +1,5 @@
+import { toCharacterInfo, type CharacterInfo } from './character-info'
+
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI
 
 // ---------------------------------------------------------------------------
@@ -374,12 +376,14 @@ spindle.onFrontendMessage(async (payload: any, userId: string) => {
         // Paginate through ALL characters — the API caps a single page,
         // so users with large libraries would otherwise see only a fraction.
         const PAGE = 200
-        const all: import('lumiverse-spindle-types').CharacterDTO[] = []
+        const all: CharacterInfo[] = []
         let offset = 0
         let total = Infinity
         while (offset < total) {
           const { data, total: t } = await spindle.characters.list({ limit: PAGE, offset, userId })
-          all.push(...data)
+          // Do not retain or send full cards. Generation fetches the character
+          // and resolves its prompt macros on the backend when the nudge runs.
+          all.push(...data.map(toCharacterInfo))
           total = t
           offset += data.length
           if (data.length < PAGE) break

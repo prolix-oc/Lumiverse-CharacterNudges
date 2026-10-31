@@ -1,3 +1,9 @@
+// src/character-info.ts
+function toCharacterInfo(character) {
+  const { id, name, image_id } = character;
+  return { id, name, image_id };
+}
+
 // src/frontend.ts
 var READY_MIN_VERSION = [1, 0, 6];
 function parseVersionSegment(segment) {
@@ -1182,7 +1188,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
         render();
         break;
       case "characters_loaded":
-        characters = payload.characters ?? [];
+        characters = (payload.characters ?? []).map(toCharacterInfo);
         configs = payload.configs ?? {};
         draftConfigs = {};
         render();
@@ -1233,7 +1239,7 @@ Stay fully in character. Be creative — sometimes playful, sometimes sincere, s
       }
       case "nudge_history_cleared": {
         pendingHistoryClears.delete(payload.characterId);
-        if (activeHistoryModal?.characterId === payload.characterId) {
+        if (activeHistoryModal && activeHistoryModal.characterId === payload.characterId) {
           activeHistoryModal.finishClear(payload.error);
         }
         break;

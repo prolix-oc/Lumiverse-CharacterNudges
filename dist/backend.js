@@ -1,4 +1,10 @@
 // @bun
+// src/character-info.ts
+function toCharacterInfo(character) {
+  const { id, name, image_id } = character;
+  return { id, name, image_id };
+}
+
 // src/backend.ts
 var DEFAULT_SYSTEM_PROMPT = `You are {{char}}. Stay fully in character at all times.
 {{description}}
@@ -244,7 +250,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
         let total = Infinity;
         while (offset < total) {
           const { data, total: t } = await spindle.characters.list({ limit: PAGE, offset, userId });
-          all.push(...data);
+          all.push(...data.map(toCharacterInfo));
           total = t;
           offset += data.length;
           if (data.length < PAGE)
